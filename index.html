@@ -1,470 +1,877 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <title>打砖块游戏</title>
-    <style>
-        body {
-            margin: 0;
-            background-color: #222;
-            overflow: hidden;
-            font-family: 'Microsoft YaHei', Arial, sans-serif;
-        }
-        #gameCanvas {
-            display: block;
-            margin: 0 auto;
-            background-color: #333;
-            border: 2px solid #fff;
-            box-shadow: 0 0 20px #000;
-        }
-        #message, #stats {
-            position: absolute;
-            color: #fff;
-            text-align: center;
-            width: 100%;
-            user-select: none;
-        }
-        #message {
-            top: 20px;
-            font-size: 24px;
-        }
-        #stats {
-            top: 60px;
-            font-size: 18px;
-        }
-    </style>
+<meta charset="UTF-8">
+<title>超级打砖块</title>
+<style>
+body{
+    margin:0;
+    background:radial-gradient(circle at top,#26324a,#111827 60%,#050816);
+    overflow:hidden;
+    font-family:"Microsoft YaHei",Arial,sans-serif;
+}
+#gameCanvas{
+    display:block;
+    margin:20px auto;
+    background:#101827;
+    border:2px solid #7dd3fc;
+    border-radius:18px;
+    box-shadow:0 0 30px #38bdf8aa;
+}
+#message,#stats,#help{
+    position:absolute;
+    color:white;
+    width:100%;
+    text-align:center;
+    user-select:none;
+    text-shadow:0 0 10px #000;
+}
+#message{
+    top:34px;
+    font-size:26px;
+    font-weight:bold;
+}
+#stats{
+    top:72px;
+    font-size:18px;
+}
+#help{
+    bottom:18px;
+    font-size:15px;
+    color:#dbeafe;
+}
+</style>
 </head>
+
 <body>
-    <div id="message">点击鼠标开始游戏</div>
-    <div id="stats"></div>
-    <canvas id="gameCanvas" width="1000" height="800"></canvas>
-    <script>
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        const messageEl = document.getElementById('message');
-        const statsEl = document.getElementById('stats');
+<div id="message">点击鼠标开始游戏</div>
+<div id="stats"></div>
+<div id="help">鼠标控制挡板｜空格发射激光｜黄色=克隆｜蓝色=生命｜青色=护盾｜绿色=挡板加长</div>
+<canvas id="gameCanvas" width="1000" height="800"></canvas>
 
-        let isGameRunning = false;
-        let isLevelTransition = false; // 关卡过渡状态
-        let lives = 3;
-        let score = 0;
-        let level = 0;
-        const maxLevels = 10; // 设置关卡数量
+<script>
+const canvas=document.getElementById("gameCanvas");
+const ctx=canvas.getContext("2d");
+const messageEl=document.getElementById("message");
+const statsEl=document.getElementById("stats");
 
-        let balls = [];
-        const ballTemplate = {
-            x: canvas.width / 2,
-            y: canvas.height - 50, // 调整位置
-            dx: 4,
-            dy: -4,
-            radius: 10,
-            speed: 4,
-            color: '#f00',
-            active: true,
-        };
+let running=false;
+let transition=false;
+let lives=3;
+let score=0;
+let level=0;
+let combo=0;
+let shield=false;
+let shakeTime=0;
+let particles=[];
+let lasers=[];
+let powerUps=[];
+let bricks=[];
+let balls=[];
 
-        const paddle = {
-            height: 10,
-            width: 120, // 调整挡板宽度
-            x: (canvas.width - 120) / 2,
-            speed: 7,
-            color: '#0f0',
-        };
+const maxLevels=10;
+const maxBalls=500;
+const maxBallSpeed=8;
 
-        let bricks = [];
+const paddle={
+    x:canvas.width/2-70,
+    y:canvas.height-28,
+    width:140,
+    height:12,
+    color:"#22c55e"
+};
 
-        let powerUps = [];
-        const powerUpTypes = ['multiBall', 'shrink', 'expandPaddle', 'speedUp', 'extraLife'];
-        const powerUpColors = {
-            multiBall: '#FFD700',    // 金色
-            shrink: '#FF69B4',       // 粉红
-            expandPaddle: '#32CD32', // 绿色
-            speedUp: '#FF4500',      // 橙红
-            extraLife: '#1E90FF',    // 深天蓝
-        };
+const ballTemplate={
+    x:canvas.width/2,
+    y:canvas.height-60,
+    dx:4,
+    dy:-4,
+    radius:9,
+    color:"#f43f5e",
+    active:true,
+    trail:[]
+};
 
-        // 添加小球的最大速度上限
-        const maxBallSpeed = 8; // 小球的最大速度上限
+const powerUpColors={
+    multiBall:"#facc15",
+    extraLife:"#38bdf8",
+    expandPaddle:"#22c55e",
+    speedUp:"#fb923c",
+    shrink:"#f472b6",
+    shield:"#06b6d4",
+    laser:"#ef4444",
+    blast:"#a855f7"
+};
 
-        // 添加小球数量的最大限制
-        const maxBalls = 500; // 小球的最大数量上限
+const powerUpNames={
+    multiBall:"克隆",
+    extraLife:"+1",
+    expandPaddle:"加长",
+    speedUp:"加速",
+    shrink:"缩小",
+    shield:"护盾",
+    laser:"激光",
+    blast:"爆破"
+};
 
-        // 定义道具掉落的概率分布
-        const powerUpProbabilities = [
-            { type: 'multiBall', probability: 0.5 },
-            { type: 'extraLife', probability: 0.3 },
-            { type: 'expandPaddle', probability: 0.1 },
-            { type: 'speedUp', probability: 0.05 },
-            { type: 'shrink', probability: 0.05 }
-        ];
+const powerUpProbabilities=[
+    {type:"multiBall",p:0.38},
+    {type:"extraLife",p:0.20},
+    {type:"expandPaddle",p:0.12},
+    {type:"shield",p:0.12},
+    {type:"laser",p:0.08},
+    {type:"blast",p:0.05},
+    {type:"speedUp",p:0.03},
+    {type:"shrink",p:0.02}
+];
 
-        // 音频上下文
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+let laserMode=false;
+let laserTimer=0;
 
-        function playSound(frequency, type = 'sine', duration = 0.1) {
-            const oscillator = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
+const audioCtx=new (window.AudioContext||window.webkitAudioContext)();
 
-            oscillator.type = type;
-            oscillator.frequency.value = frequency;
+function sound(freq,type="sine",time=0.08,vol=0.08){
+    if(audioCtx.state==="suspended") audioCtx.resume();
+    const osc=audioCtx.createOscillator();
+    const gain=audioCtx.createGain();
+    osc.type=type;
+    osc.frequency.value=freq;
+    gain.gain.value=vol;
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+time);
+    osc.stop(audioCtx.currentTime+time);
+}
 
-            oscillator.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
+function randPower(){
+    let r=Math.random();
+    let sum=0;
+    for(const item of powerUpProbabilities){
+        sum+=item.p;
+        if(r<sum) return item.type;
+    }
+    return "multiBall";
+}
 
-            oscillator.start();
+function initBricks(){
+    bricks=[];
+    const bossLevel=(level+1)%5===0;
 
-            gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
+    if(bossLevel){
+        bricks.boss=true;
+        bricks.brickWidth=220;
+        bricks.brickHeight=70;
+        bricks.columnCount=1;
+        bricks.rowCount=1;
+        bricks[0]=[{
+            x:canvas.width/2-110,
+            y:90,
+            status:1,
+            type:"boss",
+            hp:60+level*10,
+            maxHp:60+level*10,
+            color:"#d946ef"
+        }];
+        return;
+    }
 
-            oscillator.stop(audioCtx.currentTime + duration);
-        }
+    const rowCount=Math.floor(Math.random()*3)+9;
+    const columnCount=Math.floor(Math.random()*5)+16;
+    const brickWidth=45;
+    const brickHeight=15;
+    const brickPadding=5;
+    const offsetLeft=(canvas.width-(columnCount*(brickWidth+brickPadding))+brickPadding)/2;
+    const offsetTop=70;
 
-        function initBricks() {
-            // 随机生成砖块布局，缩小砖块尺寸，增加砖块数量
-            const rowCount = Math.floor(Math.random() * 3) + 8; // 8到10行
-            const columnCount = Math.floor(Math.random() * 5) + 16; // 16到20列
-            bricks = [];
+    bricks.brickWidth=brickWidth;
+    bricks.brickHeight=brickHeight;
+    bricks.brickPadding=brickPadding;
+    bricks.offsetLeft=offsetLeft;
+    bricks.offsetTop=offsetTop;
+    bricks.columnCount=columnCount;
+    bricks.rowCount=rowCount;
+    bricks.boss=false;
 
-            // 缩小砖块尺寸
-            const brickWidth = 45;  // 砖块宽度
-            const brickHeight = 15; // 砖块高度
-            const brickPadding = 5; // 砖块间距
-            const brickOffsetLeft = (canvas.width - (columnCount * (brickWidth + brickPadding)) + brickPadding) / 2;
-            const brickOffsetTop = 60;
+    for(let c=0;c<columnCount;c++){
+        bricks[c]=[];
+        for(let r=0;r<rowCount;r++){
+            let status=Math.random()<0.84?1:0;
+            let type="normal";
+            let hp=1;
+            const rd=Math.random();
 
-            for (let c = 0; c < columnCount; c++) {
-                bricks[c] = [];
-                for (let r = 0; r < rowCount; r++) {
-                    let status = Math.random() < 0.8 ? 1 : 0; // 80%的概率生成砖块
-                    const color = 'hsl(' + Math.random() * 360 + ', 100%, 50%)';
-                    bricks[c][r] = { x: 0, y: 0, status, color };
+            if(status){
+                if(rd<0.08){
+                    type="bomb";
+                    hp=1;
+                }else if(rd<0.20){
+                    type="hard";
+                    hp=3;
+                }else if(rd<0.27){
+                    type="gift";
+                    hp=1;
                 }
             }
 
-            // 存储砖块尺寸和位置信息
-            bricks.brickWidth = brickWidth;
-            bricks.brickHeight = brickHeight;
-            bricks.brickPadding = brickPadding;
-            bricks.brickOffsetLeft = brickOffsetLeft;
-            bricks.brickOffsetTop = brickOffsetTop;
-            bricks.columnCount = columnCount;
-            bricks.rowCount = rowCount;
+            bricks[c][r]={
+                x:0,
+                y:0,
+                status,
+                type,
+                hp,
+                maxHp:hp,
+                color:`hsl(${Math.random()*360},90%,58%)`
+            };
         }
+    }
+}
 
-        function initGame() {
-            isGameRunning = true;
-            isLevelTransition = false;
-            lives = 3;
-            score = 0;
-            level = 0;
-            balls = [];
-            powerUps = []; // 重置道具数组
-            let newBall = { ...ballTemplate };
-            balls.push(newBall);
-            resetBall(newBall);
-            initBricks();
-            messageEl.style.display = 'none';
-            draw();
-        }
+function startGame(){
+    running=true;
+    transition=false;
+    lives=3;
+    score=0;
+    level=0;
+    combo=0;
+    shield=false;
+    laserMode=false;
+    laserTimer=0;
+    balls=[];
+    powerUps=[];
+    particles=[];
+    lasers=[];
 
-        function resetBall(ball) {
-            ball.x = canvas.width / 2;
-            ball.y = canvas.height - 50; // 调整位置
-            ball.dx = ball.speed * (Math.random() > 0.5 ? 1 : -1);
-            ball.dy = -ball.speed;
-            ball.active = true;
-        }
+    const b={...ballTemplate,trail:[]};
+    resetBall(b);
+    balls.push(b);
 
-        function drawBalls() {
-            balls.forEach(ball => {
-                if (ball.active) {
-                    ctx.beginPath();
-                    ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-                    ctx.fillStyle = ball.color;
-                    ctx.fill();
-                    ctx.closePath();
-                }
-            });
-        }
+    paddle.width=140;
+    paddle.x=canvas.width/2-paddle.width/2;
 
-        function drawPaddle() {
-            ctx.beginPath();
-            ctx.rect(paddle.x, canvas.height - paddle.height - 10, paddle.width, paddle.height);
-            ctx.fillStyle = paddle.color;
-            ctx.fill();
-            ctx.closePath();
-        }
+    initBricks();
+    messageEl.style.display="none";
+    requestAnimationFrame(loop);
+}
 
-        function drawBricks() {
-            if (bricks.length === 0) return;
+function resetBall(ball){
+    ball.x=canvas.width/2;
+    ball.y=canvas.height-60;
+    ball.dx=4*(Math.random()>0.5?1:-1);
+    ball.dy=-4;
+    ball.active=true;
+    ball.trail=[];
+}
 
-            const brickWidth = bricks.brickWidth;
-            const brickHeight = bricks.brickHeight;
-            const brickPadding = bricks.brickPadding;
-            const brickOffsetLeft = bricks.brickOffsetLeft;
-            const brickOffsetTop = bricks.brickOffsetTop;
-            const columnCount = bricks.columnCount;
-            const rowCount = bricks.rowCount;
+function drawBackground(){
+    ctx.fillStyle="#101827";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
 
-            for (let c = 0; c < columnCount; c++) {
-                for (let r = 0; r < rowCount; r++) {
-                    const b = bricks[c][r];
-                    if (b.status === 1) {
-                        const brickX = (c * (brickWidth + brickPadding)) + brickOffsetLeft;
-                        const brickY = (r * (brickHeight + brickPadding)) + brickOffsetTop;
-                        b.x = brickX;
-                        b.y = brickY;
-                        ctx.beginPath();
-                        ctx.rect(brickX, brickY, brickWidth, brickHeight);
-                        ctx.fillStyle = b.color;
-                        ctx.fill();
-                        ctx.closePath();
-                    }
-                }
-            }
-        }
+    for(let i=0;i<45;i++){
+        ctx.fillStyle=`rgba(125,211,252,${0.04+Math.random()*0.04})`;
+        ctx.fillRect(Math.random()*canvas.width,Math.random()*canvas.height,2,2);
+    }
+}
 
-        function collisionDetection() {
-            if (bricks.length === 0) return;
-            balls.forEach(ball => {
-                if (!ball.active) return;
-                const brickWidth = bricks.brickWidth;
-                const brickHeight = bricks.brickHeight;
-                const columnCount = bricks.columnCount;
-                const rowCount = bricks.rowCount;
-                for (let c = 0; c < columnCount; c++) {
-                    for (let r = 0; r < rowCount; r++) {
-                        const b = bricks[c][r];
-                        if (b.status === 1) {
-                            if (
-                                ball.x > b.x &&
-                                ball.x < b.x + brickWidth &&
-                                ball.y > b.y &&
-                                ball.y < b.y + brickHeight
-                            ) {
-                                ball.dy = -ball.dy;
-                                b.status = 0;
-                                score++;
-                                playSound(200 + Math.random() * 200);
-                                // **提高道具掉落概率**
-                                if (Math.random() < 0.9) { // 总体道具掉落概率90%
-                                    let type;
-                                    let rand = Math.random();
-                                    let cumulativeProbability = 0;
-                                    for (let i = 0; i < powerUpProbabilities.length; i++) {
-                                        cumulativeProbability += powerUpProbabilities[i].probability;
-                                        if (rand < cumulativeProbability) {
-                                            type = powerUpProbabilities[i].type;
-                                            break;
-                                        }
-                                    }
-                                    powerUps.push({ x: b.x + brickWidth / 2, y: b.y + brickHeight / 2, type });
-                                }
-                                if (isLevelCleared()) {
-                                    isLevelTransition = true; // 设置关卡过渡状态
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-        function isLevelCleared() {
-            for (let c = 0; c < bricks.length; c++) {
-                for (let r = 0; r < bricks[c].length; r++) {
-                    if (bricks[c][r].status === 1) {
-                        return false;
-                    }
-                }
-            }
-            return true;
-        }
-
-        function drawStats() {
-            statsEl.innerHTML = `得分: ${score}　生命: ${lives}　等级: ${level + 1}`;
-        }
-
-        function drawBackground() {
-            ctx.fillStyle = '#222';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-        }
-
-        function drawPowerUps() {
-            powerUps.forEach((pu) => {
-                ctx.beginPath();
-                ctx.arc(pu.x, pu.y, 10, 0, Math.PI * 2);
-                ctx.fillStyle = powerUpColors[pu.type];
-                ctx.fill();
-                ctx.closePath();
-            });
-        }
-
-        function movePowerUps() {
-            powerUps.forEach((pu, index) => {
-                pu.y += 3; // 将道具下落速度从5调整为3
-                if (pu.y + 10 > canvas.height - paddle.height - 10 && pu.x > paddle.x && pu.x < paddle.x + paddle.width) {
-                    applyPowerUp(pu.type);
-                    powerUps.splice(index, 1);
-                }
-                else if (pu.y > canvas.height) {
-                    powerUps.splice(index, 1);
-                }
-            });
-        }
-
-        function applyPowerUp(type) {
-            switch (type) {
-                case 'multiBall':
-                    if (balls.length < maxBalls) {
-                        let newBalls = [];
-                        let currentBallCount = balls.length; // 在克隆前记录当前小球数量
-                        balls.forEach(ball => {
-                            if (ball.active && newBalls.length + currentBallCount < maxBalls) {
-                                // 克隆新的小球
-                                let newBall = { ...ball };
-                                // 为新小球添加微小的角度变化
-                                let angle = Math.atan2(ball.dy, ball.dx);
-                                let speed = Math.sqrt(ball.dx * ball.dx + ball.dy * ball.dy);
-                                let angleOffset = (Math.random() * 0.4 - 0.2); // -0.2到0.2弧度的随机偏移
-                                let newAngle = angle + angleOffset;
-                                newBall.dx = speed * Math.cos(newAngle);
-                                newBall.dy = speed * Math.sin(newAngle);
-                                newBalls.push(newBall);
-                            }
-                        });
-                        balls.push(...newBalls);
-                    }
-                    break;
-                case 'shrink':
-                    balls.forEach(ball => {
-                        ball.radius = Math.max(5, ball.radius - 3);
-                    });
-                    break;
-                case 'expandPaddle':
-                    paddle.width += 50;
-                    setTimeout(() => {
-                        paddle.width -= 50;
-                    }, 10000);
-                    break;
-                case 'speedUp':
-                    balls.forEach(ball => {
-                        ball.dx *= 1.5;
-                        ball.dy *= 1.5;
-                        // 限制小球速度不超过最大速度
-                        let speed = Math.sqrt(ball.dx * ball.dx + ball.dy * ball.dy);
-                        if (speed > maxBallSpeed) {
-                            let scale = maxBallSpeed / speed;
-                            ball.dx *= scale;
-                            ball.dy *= scale;
-                        }
-                    });
-                    break;
-                case 'extraLife':
-                    lives += 1;
-                    break;
-            }
-        }
-
-        function draw() {
-            if (!isGameRunning) return;
-
-            if (isLevelTransition) {
-                // 处理关卡过渡
-                level++;
-                if (level >= maxLevels) {
-                    isGameRunning = false;
-                    playSound(523.25, 'square', 0.5); // C5 音符
-                    messageEl.innerText = '恭喜通关！点击鼠标重新开始';
-                    messageEl.style.display = 'block';
-                    return;
-                } else {
-                    // 重置游戏元素
-                    balls = [];
-                    powerUps = [];
-                    let newBall = { ...ballTemplate };
-                    balls.push(newBall);
-                    resetBall(newBall);
-                    initBricks();
-                    isLevelTransition = false; // 结束关卡过渡
-                }
-            }
-
-            drawBackground();
-            drawBricks();
-            drawBalls();
-            drawPaddle();
-            drawPowerUps();
-            drawStats();
-            collisionDetection();
-            movePowerUps();
-
-            balls.forEach((ball) => {
-                if (!ball.active) return;
-
-                if (ball.x + ball.dx > canvas.width - ball.radius || ball.x + ball.dx < ball.radius) {
-                    ball.dx = -ball.dx;
-                    playSound(300);
-                }
-                if (ball.y + ball.dy < ball.radius) {
-                    ball.dy = -ball.dy;
-                    playSound(300);
-                } else if (ball.y + ball.dy > canvas.height - ball.radius - paddle.height - 10) {
-                    if (ball.x > paddle.x && ball.x < paddle.x + paddle.width) {
-                        ball.dy = -ball.dy;
-                        playSound(300);
-                    } else {
-                        ball.active = false;
-                        if (balls.every(b => !b.active)) {
-                            lives--;
-                            playSound(100, 'sawtooth');
-                            if (lives > 0) {
-                                balls = [];
-                                let newBall = { ...ballTemplate };
-                                balls.push(newBall);
-                                resetBall(newBall);
-                            } else {
-                                isGameRunning = false;
-                                playSound(65.41, 'sawtooth', 0.5); // C2 音符
-                                messageEl.innerText = '游戏结束！点击鼠标重新开始';
-                                messageEl.style.display = 'block';
-                            }
-                        }
-                    }
-                }
-
-                ball.x += ball.dx;
-                ball.y += ball.dy;
-            });
-
-            requestAnimationFrame(draw);
-        }
-
-        function mouseMoveHandler(e) {
-            const relativeX = e.clientX - canvas.offsetLeft;
-            if (relativeX > 0 && relativeX < canvas.width) {
-                paddle.x = relativeX - paddle.width / 2;
-            }
-        }
-
-        function touchMoveHandler(e) {
-            const touch = e.touches[0];
-            const relativeX = touch.clientX - canvas.offsetLeft;
-            if (relativeX > 0 && relativeX < canvas.width) {
-                paddle.x = relativeX - paddle.width / 2;
-            }
-            e.preventDefault();
-        }
-
-        document.addEventListener('mousemove', mouseMoveHandler, false);
-        document.addEventListener('touchmove', touchMoveHandler, false);
-        document.addEventListener('click', function () {
-            if (!isGameRunning) {
-                initGame();
-            }
+function spawnParticles(x,y,color,count=18){
+    for(let i=0;i<count;i++){
+        particles.push({
+            x,y,
+            dx:(Math.random()-0.5)*8,
+            dy:(Math.random()-0.5)*8,
+            life:30+Math.random()*15,
+            color
         });
+    }
+}
 
-        // 初始化游戏
-        initBricks();
-    </script>
+function drawParticles(){
+    for(let i=particles.length-1;i>=0;i--){
+        const p=particles[i];
+        p.x+=p.dx;
+        p.y+=p.dy;
+        p.dy+=0.05;
+        p.life--;
+
+        ctx.globalAlpha=Math.max(p.life/40,0);
+        ctx.fillStyle=p.color;
+        ctx.fillRect(p.x,p.y,4,4);
+        ctx.globalAlpha=1;
+
+        if(p.life<=0) particles.splice(i,1);
+    }
+}
+
+function drawPaddle(){
+    const g=ctx.createLinearGradient(paddle.x,paddle.y,paddle.x+paddle.width,paddle.y);
+    g.addColorStop(0,"#22c55e");
+    g.addColorStop(0.5,laserMode?"#ef4444":"#86efac");
+    g.addColorStop(1,"#22c55e");
+
+    ctx.fillStyle=g;
+    ctx.shadowColor=laserMode?"#ef4444":"#22c55e";
+    ctx.shadowBlur=18;
+    ctx.fillRect(paddle.x,paddle.y,paddle.width,paddle.height);
+    ctx.shadowBlur=0;
+
+    if(shield){
+        ctx.fillStyle="#22d3ee88";
+        ctx.fillRect(0,canvas.height-6,canvas.width,6);
+    }
+}
+
+function drawBalls(){
+    balls.forEach(ball=>{
+        if(!ball.active)return;
+
+        ball.trail.forEach((t,i)=>{
+            ctx.globalAlpha=i/ball.trail.length*0.6;
+            ctx.beginPath();
+            ctx.arc(t.x,t.y,ball.radius*(i/ball.trail.length),0,Math.PI*2);
+            ctx.fillStyle="#fb7185";
+            ctx.fill();
+        });
+        ctx.globalAlpha=1;
+
+        ctx.beginPath();
+        ctx.shadowColor="#fb7185";
+        ctx.shadowBlur=14;
+        ctx.arc(ball.x,ball.y,ball.radius,0,Math.PI*2);
+        ctx.fillStyle=ball.color;
+        ctx.fill();
+        ctx.shadowBlur=0;
+    });
+}
+
+function brickColor(b){
+    if(b.type==="bomb")return "#ef4444";
+    if(b.type==="hard")return "#94a3b8";
+    if(b.type==="gift")return "#facc15";
+    if(b.type==="boss")return "#d946ef";
+    return b.color;
+}
+
+function drawBricks(){
+    if(!bricks.length)return;
+
+    if(bricks.boss){
+        const b=bricks[0][0];
+        if(!b.status)return;
+
+        ctx.fillStyle="#d946ef";
+        ctx.shadowColor="#d946ef";
+        ctx.shadowBlur=25;
+        ctx.fillRect(b.x,b.y,220,70);
+        ctx.shadowBlur=0;
+
+        ctx.fillStyle="#fff";
+        ctx.font="22px Arial";
+        ctx.fillText("BOSS",b.x+78,b.y+32);
+
+        ctx.fillStyle="#111827";
+        ctx.fillRect(b.x+20,b.y+45,180,12);
+        ctx.fillStyle="#22c55e";
+        ctx.fillRect(b.x+20,b.y+45,180*(b.hp/b.maxHp),12);
+        return;
+    }
+
+    const w=bricks.brickWidth,h=bricks.brickHeight,p=bricks.brickPadding;
+    const ox=bricks.offsetLeft,oy=bricks.offsetTop;
+
+    for(let c=0;c<bricks.columnCount;c++){
+        for(let r=0;r<bricks.rowCount;r++){
+            const b=bricks[c][r];
+            if(!b.status)continue;
+
+            const x=ox+c*(w+p);
+            const y=oy+r*(h+p);
+            b.x=x;
+            b.y=y;
+
+            ctx.fillStyle=brickColor(b);
+            ctx.shadowColor=brickColor(b);
+            ctx.shadowBlur=8;
+            ctx.fillRect(x,y,w,h);
+            ctx.shadowBlur=0;
+
+            if(b.type==="hard"){
+                ctx.fillStyle="#111827";
+                ctx.font="12px Arial";
+                ctx.fillText(b.hp,x+w/2-4,y+12);
+            }
+
+            if(b.type==="bomb"){
+                ctx.fillStyle="#fff";
+                ctx.font="12px Arial";
+                ctx.fillText("💣",x+w/2-8,y+13);
+            }
+
+            if(b.type==="gift"){
+                ctx.fillStyle="#111827";
+                ctx.font="12px Arial";
+                ctx.fillText("★",x+w/2-4,y+12);
+            }
+        }
+    }
+}
+
+function damageBrick(c,r,damage=1){
+    const b=bricks[c]?.[r];
+    if(!b||!b.status)return;
+
+    b.hp-=damage;
+
+    if(b.hp>0){
+        sound(160,"square",0.05);
+        return;
+    }
+
+    b.status=0;
+    score+=10+combo;
+    combo++;
+    spawnParticles(b.x+bricks.brickWidth/2,b.y+bricks.brickHeight/2,brickColor(b),18);
+    sound(220+Math.random()*300,"triangle",0.06);
+
+    if(b.type==="bomb"){
+        shakeTime=16;
+        sound(70,"sawtooth",0.25,0.12);
+        for(let cc=-1;cc<=1;cc++){
+            for(let rr=-1;rr<=1;rr++){
+                const nb=bricks[c+cc]?.[r+rr];
+                if(nb&&nb.status){
+                    nb.status=0;
+                    score+=12;
+                    spawnParticles(nb.x+bricks.brickWidth/2,nb.y+bricks.brickHeight/2,brickColor(nb),10);
+                }
+            }
+        }
+    }
+
+    const dropChance=b.type==="gift"?1:0.9;
+    if(Math.random()<dropChance){
+        const type=b.type==="gift"?randPower():randPower();
+        powerUps.push({
+            x:b.x+bricks.brickWidth/2,
+            y:b.y+bricks.brickHeight/2,
+            type,
+            vy:2.6
+        });
+    }
+}
+
+function hitBoss(ball){
+    const b=bricks[0][0];
+    if(!b.status)return;
+
+    if(ball.x>b.x&&ball.x<b.x+220&&ball.y>b.y&&ball.y<b.y+70){
+        ball.dy*=-1;
+        b.hp--;
+        score+=5;
+        combo++;
+        spawnParticles(ball.x,ball.y,"#d946ef",8);
+        sound(150,"square",0.05);
+
+        if(b.hp<=0){
+            b.status=0;
+            score+=500;
+            shakeTime=30;
+            spawnParticles(b.x+110,b.y+35,"#d946ef",80);
+            transition=true;
+        }
+    }
+}
+
+function collisionDetection(){
+    if(!bricks.length)return;
+
+    balls.forEach(ball=>{
+        if(!ball.active)return;
+
+        if(bricks.boss){
+            hitBoss(ball);
+            return;
+        }
+
+        for(let c=0;c<bricks.columnCount;c++){
+            for(let r=0;r<bricks.rowCount;r++){
+                const b=bricks[c][r];
+                if(!b.status)continue;
+
+                if(ball.x>b.x&&ball.x<b.x+bricks.brickWidth&&ball.y>b.y&&ball.y<b.y+bricks.brickHeight){
+                    ball.dy*=-1;
+                    damageBrick(c,r,1);
+
+                    if(isLevelCleared()) transition=true;
+                    return;
+                }
+            }
+        }
+    });
+}
+
+function isLevelCleared(){
+    if(bricks.boss){
+        return !bricks[0][0].status;
+    }
+
+    for(let c=0;c<bricks.length;c++){
+        for(let r=0;r<bricks[c].length;r++){
+            if(bricks[c][r].status)return false;
+        }
+    }
+    return true;
+}
+
+function drawPowerUps(){
+    powerUps.forEach(pu=>{
+        ctx.beginPath();
+        ctx.shadowColor=powerUpColors[pu.type];
+        ctx.shadowBlur=15;
+        ctx.fillStyle=powerUpColors[pu.type];
+        ctx.arc(pu.x,pu.y,12,0,Math.PI*2);
+        ctx.fill();
+        ctx.shadowBlur=0;
+
+        ctx.fillStyle="#111827";
+        ctx.font="11px Arial";
+        ctx.textAlign="center";
+        ctx.fillText(powerUpNames[pu.type],pu.x,pu.y+4);
+        ctx.textAlign="left";
+    });
+}
+
+function movePowerUps(){
+    for(let i=powerUps.length-1;i>=0;i--){
+        const pu=powerUps[i];
+        pu.y+=pu.vy;
+
+        if(pu.y+12>paddle.y&&pu.x>paddle.x&&pu.x<paddle.x+paddle.width){
+            applyPowerUp(pu.type);
+            spawnParticles(pu.x,pu.y,powerUpColors[pu.type],20);
+            powerUps.splice(i,1);
+        }else if(pu.y>canvas.height+20){
+            powerUps.splice(i,1);
+        }
+    }
+}
+
+function applyPowerUp(type){
+    sound(600,"sine",0.08);
+
+    switch(type){
+        case "multiBall":{
+            if(balls.length>=maxBalls)return;
+
+            const activeBalls=balls.filter(b=>b.active);
+            const newBalls=[];
+
+            activeBalls.forEach(ball=>{
+                if(balls.length+newBalls.length>=maxBalls)return;
+
+                const angle=Math.atan2(ball.dy,ball.dx);
+                const speed=Math.sqrt(ball.dx*ball.dx+ball.dy*ball.dy);
+                const offset=(Math.random()*0.8-0.4);
+
+                newBalls.push({
+                    ...ball,
+                    x:ball.x,
+                    y:ball.y,
+                    dx:speed*Math.cos(angle+offset),
+                    dy:speed*Math.sin(angle+offset),
+                    trail:[]
+                });
+            });
+
+            balls.push(...newBalls);
+            break;
+        }
+
+        case "extraLife":
+            lives++;
+            break;
+
+        case "expandPaddle":
+            paddle.width=Math.min(paddle.width+45,300);
+            setTimeout(()=>paddle.width=Math.max(paddle.width-45,120),10000);
+            break;
+
+        case "speedUp":
+            balls.forEach(ball=>{
+                ball.dx*=1.25;
+                ball.dy*=1.25;
+                limitSpeed(ball);
+            });
+            break;
+
+        case "shrink":
+            balls.forEach(ball=>ball.radius=Math.max(5,ball.radius-2));
+            break;
+
+        case "shield":
+            shield=true;
+            break;
+
+        case "laser":
+            laserMode=true;
+            laserTimer=600;
+            break;
+
+        case "blast":
+            screenBlast();
+            break;
+    }
+}
+
+function screenBlast(){
+    shakeTime=25;
+    sound(90,"sawtooth",0.25,0.13);
+
+    if(bricks.boss){
+        bricks[0][0].hp=Math.max(0,bricks[0][0].hp-12);
+        if(bricks[0][0].hp<=0){
+            bricks[0][0].status=0;
+            transition=true;
+        }
+        return;
+    }
+
+    let removed=0;
+    for(let c=0;c<bricks.columnCount;c++){
+        for(let r=0;r<bricks.rowCount;r++){
+            const b=bricks[c][r];
+            if(b.status&&removed<20){
+                b.status=0;
+                score+=15;
+                removed++;
+                spawnParticles(b.x+20,b.y+8,brickColor(b),8);
+            }
+        }
+    }
+
+    if(isLevelCleared())transition=true;
+}
+
+function limitSpeed(ball){
+    const s=Math.sqrt(ball.dx*ball.dx+ball.dy*ball.dy);
+    if(s>maxBallSpeed){
+        const k=maxBallSpeed/s;
+        ball.dx*=k;
+        ball.dy*=k;
+    }
+}
+
+function updateBalls(){
+    balls.forEach(ball=>{
+        if(!ball.active)return;
+
+        ball.trail.push({x:ball.x,y:ball.y});
+        if(ball.trail.length>12)ball.trail.shift();
+
+        if(ball.x+ball.dx>canvas.width-ball.radius||ball.x+ball.dx<ball.radius){
+            ball.dx*=-1;
+            sound(260);
+        }
+
+        if(ball.y+ball.dy<ball.radius){
+            ball.dy*=-1;
+            sound(260);
+        }
+
+        if(ball.y+ball.dy>paddle.y-ball.radius){
+            if(ball.x>paddle.x&&ball.x<paddle.x+paddle.width){
+                const hit=(ball.x-(paddle.x+paddle.width/2))/(paddle.width/2);
+                ball.dx=hit*5;
+                ball.dy=-Math.abs(ball.dy);
+                limitSpeed(ball);
+                sound(360);
+            }else{
+                ball.active=false;
+                combo=0;
+            }
+        }
+
+        ball.x+=ball.dx;
+        ball.y+=ball.dy;
+    });
+
+    if(balls.every(b=>!b.active)){
+        if(shield){
+            shield=false;
+            const b={...ballTemplate,trail:[]};
+            resetBall(b);
+            balls=[b];
+            sound(500,"triangle",0.15);
+        }else{
+            lives--;
+            sound(100,"sawtooth",0.2);
+            if(lives>0){
+                const b={...ballTemplate,trail:[]};
+                resetBall(b);
+                balls=[b];
+            }else{
+                running=false;
+                messageEl.innerText="游戏结束！点击鼠标重新开始";
+                messageEl.style.display="block";
+            }
+        }
+    }
+}
+
+function fireLaser(){
+    if(!laserMode)return;
+    lasers.push({
+        x:paddle.x+paddle.width/2-2,
+        y:paddle.y-8
+    });
+    sound(760,"square",0.04,0.04);
+}
+
+function updateLasers(){
+    for(let i=lasers.length-1;i>=0;i--){
+        const l=lasers[i];
+        l.y-=12;
+
+        ctx.fillStyle="#ef4444";
+        ctx.shadowColor="#ef4444";
+        ctx.shadowBlur=15;
+        ctx.fillRect(l.x,l.y,4,22);
+        ctx.shadowBlur=0;
+
+        if(bricks.boss){
+            const b=bricks[0][0];
+            if(b.status&&l.x>b.x&&l.x<b.x+220&&l.y>b.y&&l.y<b.y+70){
+                b.hp-=2;
+                lasers.splice(i,1);
+                spawnParticles(l.x,l.y,"#ef4444",8);
+                if(b.hp<=0){
+                    b.status=0;
+                    transition=true;
+                }
+                continue;
+            }
+        }else{
+            for(let c=0;c<bricks.columnCount;c++){
+                for(let r=0;r<bricks.rowCount;r++){
+                    const b=bricks[c][r];
+                    if(b.status&&l.x>b.x&&l.x<b.x+bricks.brickWidth&&l.y>b.y&&l.y<b.y+bricks.brickHeight){
+                        damageBrick(c,r,1);
+                        lasers.splice(i,1);
+                        if(isLevelCleared())transition=true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if(l.y<0)lasers.splice(i,1);
+    }
+}
+
+function nextLevel(){
+    level++;
+    if(level>=maxLevels){
+        running=false;
+        messageEl.innerText="恭喜通关！点击重新开始";
+        messageEl.style.display="block";
+        sound(720,"triangle",0.4);
+        return;
+    }
+
+    balls=[];
+    powerUps=[];
+    lasers=[];
+    particles=[];
+
+    const b={...ballTemplate,trail:[]};
+    resetBall(b);
+    balls.push(b);
+
+    initBricks();
+    transition=false;
+
+    messageEl.innerText=`第 ${level+1} 关开始！`;
+    messageEl.style.display="block";
+    setTimeout(()=>{if(running)messageEl.style.display="none";},900);
+}
+
+function drawStats(){
+    statsEl.innerHTML=
+    `得分: ${score}　
+     生命: ${lives}　
+     关卡: ${level+1}/${maxLevels}　
+     小球: ${balls.filter(b=>b.active).length}/${maxBalls}　
+     连击: ${combo}　
+     ${shield?"护盾: ON　":""}
+     ${laserMode?"激光: ON":""}`;
+}
+
+function loop(){
+    if(!running)return;
+
+    ctx.save();
+
+    if(shakeTime>0){
+        ctx.translate((Math.random()-0.5)*10,(Math.random()-0.5)*10);
+        shakeTime--;
+    }
+
+    drawBackground();
+    drawBricks();
+    drawBalls();
+    drawPaddle();
+    drawPowerUps();
+    drawParticles();
+    updateLasers();
+    drawStats();
+
+    collisionDetection();
+    movePowerUps();
+    updateBalls();
+
+    if(laserMode){
+        laserTimer--;
+        if(laserTimer<=0)laserMode=false;
+    }
+
+    ctx.restore();
+
+    if(transition){
+        transition=false;
+        setTimeout(nextLevel,500);
+    }
+
+    requestAnimationFrame(loop);
+}
+
+function mouseMoveHandler(e){
+    const rect=canvas.getBoundingClientRect();
+    const x=e.clientX-rect.left;
+    paddle.x=x-paddle.width/2;
+    paddle.x=Math.max(0,Math.min(canvas.width-paddle.width,paddle.x));
+}
+
+document.addEventListener("mousemove",mouseMoveHandler);
+
+document.addEventListener("keydown",e=>{
+    if(e.code==="Space"){
+        e.preventDefault();
+        if(!running){
+            startGame();
+        }else{
+            fireLaser();
+        }
+    }
+});
+
+canvas.addEventListener("click",()=>{
+    if(!running)startGame();
+});
+
+initBricks();
+drawBackground();
+drawBricks();
+drawPaddle();
+drawStats();
+</script>
 </body>
 </html>
