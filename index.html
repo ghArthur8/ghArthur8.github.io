@@ -497,6 +497,7 @@ function createBall(stuck = false, source) {
 
 function launchBalls() {
     if (state.mode === "ready") return;
+    let launched = false;
     const aim = getAim();
     state.balls.forEach(ball => {
         if (!ball.stuck) return;
@@ -504,7 +505,9 @@ function launchBalls() {
         ball.dx = Math.cos(aim) * speed;
         ball.dy = Math.sin(aim) * speed;
         ball.stuck = false;
+        launched = true;
     });
+    if (!launched) return;
     state.mode = "playing";
     beep(540, "triangle", .08);
 }
@@ -662,6 +665,13 @@ function levelCleared() {
     return state.bricks.every(b => !b.alive);
 }
 
+function prepareRespawnBall() {
+    state.balls = [];
+    createBall(true);
+    state.mode = "aim";
+    state.lasers = [];
+}
+
 function nextLevel() {
     state.level += 1;
     if (state.level > 12) {
@@ -679,7 +689,7 @@ function nextLevel() {
 function loseLife() {
     if (state.shield) {
         state.shield = false;
-        createBall(true);
+        prepareRespawnBall();
         setTemporaryMessage("护盾救了一球。");
         beep(520, "triangle", .15);
         return;
@@ -692,9 +702,7 @@ function loseLife() {
         showOverlay("游戏结束", `得分 ${state.score}。按空格或点击重新开始。`);
         return;
     }
-    state.balls = [];
-    createBall(true);
-    state.mode = "aim";
+    prepareRespawnBall();
     setTemporaryMessage("掉球了，重新瞄准。");
 }
 
@@ -1069,7 +1077,7 @@ document.addEventListener("keydown", e => {
     if (e.code === "Space") {
         e.preventDefault();
         if (!state || state.mode === "ready" || state.mode === "gameover" || state.mode === "win") startGame();
-        else if (state.mode === "aim") launchBalls();
+        else if (state.mode === "aim" || state.balls.some(ball => ball.stuck)) launchBalls();
         else if (state.mode === "playing") fireLaser();
     }
     if (e.code === "KeyP") pauseGame();
