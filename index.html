@@ -378,6 +378,7 @@ function makeState() {
         slowTime:0,
         aiLaunchDelay:0,
         aiLaserCooldown:0,
+        aiShotBias:1,
         modifier:modifiers[0],
         paddle:{x:W / 2 - 75, y:H - 42, w:150, h:14, target:W / 2},
         balls:[],
@@ -757,6 +758,17 @@ function predictLandingX(ball) {
     return offset <= span ? minX + offset : maxX - (offset - span);
 }
 
+function chooseAiShotBias() {
+    const alive = state.bricks.filter(brick => brick.alive);
+    if (alive.length === 0) return state.aiShotBias || 1;
+    const focusX = alive.reduce((sum, brick) => {
+        const rowWeight = 1 + (H - brick.y) / H;
+        return sum + (brick.x + brick.w / 2) * rowWeight;
+    }, 0) / alive.reduce((sum, brick) => sum + 1 + (H - brick.y) / H, 0);
+    if (Math.abs(focusX - W / 2) >= 85) state.aiShotBias = focusX < W / 2 ? -1 : 1;
+    return state.aiShotBias;
+}
+
 function chooseAiTarget() {
     const p = state.paddle;
     const center = p.x + p.w / 2;
@@ -772,20 +784,26 @@ function chooseAiTarget() {
 
     let targetX = W / 2;
     let urgency = Infinity;
+    let targetLandingX = null;
     for (const ball of state.balls) {
         const landingX = predictLandingX(ball);
         if (landingX === null) continue;
         const steps = (p.y - ball.y) / ball.dy;
         if (steps < urgency) {
             urgency = steps;
-            targetX = landingX;
+            targetLandingX = landingX;
         }
+    }
+
+    if (targetLandingX !== null) {
+        const hitBias = chooseAiShotBias() * .58;
+        targetX = targetLandingX - hitBias * (p.w / 2);
     }
 
     const catchableDrop = state.powerUps
         .filter(pu => pu.y < p.y && pu.y > H * .34)
         .sort((a, b) => b.y - a.y)[0];
-    if (catchableDrop && (urgency > 70 || Math.abs(catchableDrop.x - targetX) < p.w * .75)) {
+    if (catchableDrop && (urgency > 90 || Math.abs(catchableDrop.x - targetX) < p.w * .45)) {
         targetX = catchableDrop.x;
     } else if (urgency === Infinity) {
         const activeBall = state.balls.find(ball => !ball.stuck);
@@ -801,6 +819,8 @@ function updateAiController(dt) {
     state.aiLaunchDelay = Math.max(0, state.aiLaunchDelay - dt * 60);
     state.aiLaserCooldown = Math.max(0, state.aiLaserCooldown - dt * 60);
     if (state.mode === "aim" && state.aiLaunchDelay <= 0) {
+        const p = state.paddle;
+        pointerX = clamp(p.x + p.w / 2 + chooseAiShotBias() * 145, 0, W);
         launchBalls();
         state.aiLaunchDelay = 24;
     }
