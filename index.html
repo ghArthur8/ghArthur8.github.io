@@ -579,7 +579,7 @@ function explodeAround(origin) {
 
 function spawnPower(x, y) {
     const types = ["multi","life","wide","laser","shield","slow","blast"];
-    const weights = [24,10,16,16,12,10,7];
+    const weights = [42,10,16,16,12,10,7];
     let total = weights.reduce((a,b) => a + b, 0);
     let pick = Math.random() * total;
     let type = "multi";
