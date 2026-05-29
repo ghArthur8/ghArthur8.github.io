@@ -758,33 +758,58 @@ function predictLandingX(ball) {
     return offset <= span ? minX + offset : maxX - (offset - span);
 }
 
-function chooseAiShotBias() {
+function chooseAiBrickTarget(originX = W / 2) {
     const alive = state.bricks.filter(brick => brick.alive);
-    if (alive.length === 0) return state.aiShotBias || 1;
-    const focusX = alive.reduce((sum, brick) => {
-        const rowWeight = 1 + (H - brick.y) / H;
-        return sum + (brick.x + brick.w / 2) * rowWeight;
-    }, 0) / alive.reduce((sum, brick) => sum + 1 + (H - brick.y) / H, 0);
-    if (Math.abs(focusX - W / 2) >= 85) state.aiShotBias = focusX < W / 2 ? -1 : 1;
-    return state.aiShotBias;
+    if (alive.length === 0) return null;
+    return alive.reduce((best, brick) => {
+        const brickCenter = brick.x + brick.w / 2;
+        const frontRowBonus = brick.y * .9;
+        const laneCost = Math.abs(brickCenter - originX) * .42;
+        const specialBonus = brick.type === "gift" ? -36 : brick.type === "bomb" ? -24 : 0;
+        const score = laneCost - frontRowBonus + specialBonus;
+        return score < best.score ? {brick, score} : best;
+    }, {brick:alive[0], score:Infinity}).brick;
+}
+
+function calculateAiHitOffset(landingX, ball) {
+    const p = state.paddle;
+    const target = chooseAiBrickTarget(landingX);
+    if (!target) return state.aiShotBias * .62;
+    const targetX = target.x + target.w / 2;
+    const targetY = target.y + target.h;
+    const vertical = Math.max(180, p.y - targetY);
+    const speed = Math.min(9.2, Math.hypot(ball.dx, ball.dy) + .13);
+    let hit = ((targetX - landingX) / vertical) * (speed / 6.4) * 1.35;
+    hit = clamp(hit, -.86, .86);
+    if (Math.abs(hit) < .34) {
+        const direction = targetX >= landingX ? 1 : -1;
+        hit = direction * .34;
+    }
+    state.aiShotBias = hit >= 0 ? 1 : -1;
+    return hit;
 }
 
 function chooseAiTarget() {
     const p = state.paddle;
     const center = p.x + p.w / 2;
     if (state.mode === "aim") {
-        const alive = state.bricks.filter(brick => brick.alive);
-        if (alive.length === 0) return W / 2;
-        const target = alive.reduce((best, brick) => {
-            const score = brick.y + Math.abs((brick.x + brick.w / 2) - W / 2) * .18;
-            return score < best.score ? {brick, score} : best;
-        }, {brick:alive[0], score:Infinity}).brick;
-        return clamp(target.x + target.w / 2, 90, W - 90);
+        const target = chooseAiBrickTarget(center);
+        if (!target) return W / 2;
+        const targetX = target.x + target.w / 2;
+        const targetY = target.y + target.h;
+        const vertical = Math.max(180, p.y - targetY);
+        let aimOffset = clamp(((targetX - center) / vertical) * 1.75, -.95, .95);
+        if (Math.abs(aimOffset) < .48) {
+            const direction = targetX >= center ? 1 : -1;
+            aimOffset = direction * .48;
+        }
+        return clamp(center + aimOffset * 180, 0, W);
     }
 
     let targetX = W / 2;
     let urgency = Infinity;
     let targetLandingX = null;
+    let targetBall = null;
     for (const ball of state.balls) {
         const landingX = predictLandingX(ball);
         if (landingX === null) continue;
@@ -792,12 +817,13 @@ function chooseAiTarget() {
         if (steps < urgency) {
             urgency = steps;
             targetLandingX = landingX;
+            targetBall = ball;
         }
     }
 
     if (targetLandingX !== null) {
-        const hitBias = chooseAiShotBias() * .58;
-        targetX = targetLandingX - hitBias * (p.w / 2);
+        const hitOffset = calculateAiHitOffset(targetLandingX, targetBall);
+        targetX = targetLandingX - hitOffset * (p.w / 2);
     }
 
     const catchableDrop = state.powerUps
@@ -819,8 +845,7 @@ function updateAiController(dt) {
     state.aiLaunchDelay = Math.max(0, state.aiLaunchDelay - dt * 60);
     state.aiLaserCooldown = Math.max(0, state.aiLaserCooldown - dt * 60);
     if (state.mode === "aim" && state.aiLaunchDelay <= 0) {
-        const p = state.paddle;
-        pointerX = clamp(p.x + p.w / 2 + chooseAiShotBias() * 145, 0, W);
+        pointerX = chooseAiTarget();
         launchBalls();
         state.aiLaunchDelay = 24;
     }
