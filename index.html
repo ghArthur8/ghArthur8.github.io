@@ -744,18 +744,21 @@ function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
 }
 
+function reflectCourtX(x, radius = 9) {
+    const minX = radius;
+    const maxX = W - radius;
+    const span = maxX - minX;
+    let offset = (x - minX) % (span * 2);
+    if (offset < 0) offset += span * 2;
+    return offset <= span ? minX + offset : maxX - (offset - span);
+}
+
 function predictLandingX(ball) {
     if (ball.stuck || ball.dy <= .05) return null;
     const p = state.paddle;
     const steps = (p.y - ball.y) / ball.dy;
     if (steps <= 0) return null;
-    const minX = ball.r;
-    const maxX = W - ball.r;
-    const span = maxX - minX;
-    let x = ball.x + ball.dx * steps;
-    let offset = (x - minX) % (span * 2);
-    if (offset < 0) offset += span * 2;
-    return offset <= span ? minX + offset : maxX - (offset - span);
+    return reflectCourtX(ball.x + ball.dx * steps, ball.r);
 }
 
 function chooseAiBrickTarget(originX = W / 2) {
@@ -773,20 +776,52 @@ function chooseAiBrickTarget(originX = W / 2) {
 
 function calculateAiHitOffset(landingX, ball) {
     const p = state.paddle;
-    const target = chooseAiBrickTarget(landingX);
-    if (!target) return state.aiShotBias * .62;
-    const targetX = target.x + target.w / 2;
-    const targetY = target.y + target.h;
-    const vertical = Math.max(180, p.y - targetY);
     const speed = Math.min(9.2, Math.hypot(ball.dx, ball.dy) + .13);
-    let hit = ((targetX - landingX) / vertical) * (speed / 6.4) * 1.35;
-    hit = clamp(hit, -.86, .86);
-    if (Math.abs(hit) < .34) {
-        const direction = targetX >= landingX ? 1 : -1;
-        hit = direction * .34;
+    const startY = p.y - ball.r - 1;
+    const candidates = state.bricks.filter(brick => brick.alive);
+    if (candidates.length === 0) return state.aiShotBias * .62;
+
+    let best = {hit:state.aiShotBias * .62, score:Infinity};
+    for (const brick of candidates) {
+        const targetX = brick.x + brick.w / 2;
+        const targetY = brick.y + brick.h / 2;
+        const vertical = Math.max(120, startY - targetY);
+        for (let hit = -.9; hit <= .9; hit += .04) {
+            if (Math.abs(hit) < .28) continue;
+            const dx = hit * 6.4;
+            const dy = -Math.sqrt(Math.max(10, speed * speed - dx * dx));
+            const steps = vertical / -dy;
+            const routeX = reflectCourtX(landingX + dx * steps, ball.r);
+            const miss = Math.max(0, Math.abs(routeX - targetX) - brick.w / 2);
+            const angleReward = Math.abs(hit) * 8;
+            const specialBonus = brick.type === "gift" ? 18 : brick.type === "bomb" ? 14 : 0;
+            const score = miss * 16 + brick.y * .02 - angleReward - specialBonus;
+            if (score < best.score) best = {hit, score};
+        }
     }
-    state.aiShotBias = hit >= 0 ? 1 : -1;
-    return hit;
+
+    state.aiShotBias = best.hit >= 0 ? 1 : -1;
+    return clamp(best.hit, -.9, .9);
+}
+
+function isMultiBallActive() {
+    return state.balls.filter(ball => !ball.dead && !ball.stuck).length > 1;
+}
+
+function chooseAiDropTarget() {
+    return state.powerUps
+        .filter(pu => pu.y < state.paddle.y && pu.y > H * .28)
+        .sort((a, b) => b.y - a.y)[0] || null;
+}
+
+function chooseAiLaserTarget(center) {
+    const p = state.paddle;
+    const target = chooseAiBrickTarget(center);
+    if (!target) return null;
+    const targetX = target.x + target.w / 2;
+    const leftLaserCenter = clamp(targetX - 14, p.w / 2, W - p.w / 2);
+    const rightLaserCenter = clamp(targetX - p.w + 18, p.w / 2, W - p.w / 2);
+    return Math.abs(leftLaserCenter - center) <= Math.abs(rightLaserCenter - center) ? leftLaserCenter : rightLaserCenter;
 }
 
 function chooseAiTarget() {
@@ -805,6 +840,15 @@ function chooseAiTarget() {
         }
         return clamp(center + aimOffset * 180, 0, W);
     }
+
+    const multiBall = isMultiBallActive();
+    if (multiBall && state.laserTime > 0) {
+        const laserTarget = chooseAiLaserTarget(center);
+        if (laserTarget !== null) return laserTarget;
+    }
+
+    const catchableDrop = chooseAiDropTarget();
+    if (multiBall && catchableDrop) return clamp(catchableDrop.x, p.w / 2, W - p.w / 2);
 
     let targetX = W / 2;
     let urgency = Infinity;
@@ -826,9 +870,6 @@ function chooseAiTarget() {
         targetX = targetLandingX - hitOffset * (p.w / 2);
     }
 
-    const catchableDrop = state.powerUps
-        .filter(pu => pu.y < p.y && pu.y > H * .34)
-        .sort((a, b) => b.y - a.y)[0];
     if (catchableDrop && (urgency > 90 || Math.abs(catchableDrop.x - targetX) < p.w * .45)) {
         targetX = catchableDrop.x;
     } else if (urgency === Infinity) {
