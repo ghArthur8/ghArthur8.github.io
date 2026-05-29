@@ -117,6 +117,29 @@ h1{
     font-size:12px;
     font-weight:700;
 }
+.mode-toggle{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:6px;
+    padding:4px;
+    border:1px solid #243c55;
+    border-radius:8px;
+    background:#07101d;
+}
+.mode-toggle button{
+    min-height:34px;
+    border:0;
+    border-radius:6px;
+    background:transparent;
+    color:#a8c2d8;
+    font:700 13px "Microsoft YaHei",Arial,sans-serif;
+    cursor:pointer;
+}
+.mode-toggle button.active{
+    background:#36d399;
+    color:#06131b;
+    box-shadow:0 0 18px rgba(54,211,153,.34);
+}
 .game-wrap{
     min-width:0;
     min-height:0;
@@ -255,6 +278,13 @@ h1{
     </section>
 
     <aside class="panel side">
+        <section>
+            <div class="label" style="margin-bottom:8px">玩家模式</div>
+            <div class="mode-toggle" role="group" aria-label="玩家模式">
+                <button class="active" id="playerModeBtn" type="button">玩家</button>
+                <button id="aiModeBtn" type="button">人机</button>
+            </div>
+        </section>
         <div class="badge" id="modifierBadge">词缀：准备中</div>
         <section>
             <div class="label" style="margin-bottom:10px">砖块和道具</div>
@@ -285,6 +315,8 @@ const comboEl = document.getElementById("combo");
 const feverMeter = document.getElementById("feverMeter");
 const modifierBadge = document.getElementById("modifierBadge");
 const feed = document.getElementById("feed");
+const playerModeBtn = document.getElementById("playerModeBtn");
+const aiModeBtn = document.getElementById("aiModeBtn");
 
 const W = canvas.width;
 const H = canvas.height;
@@ -318,6 +350,7 @@ const powerLabels = {
 let audioCtx;
 let state;
 let pointerX = W / 2;
+let controlMode = "player";
 let rafId = 0;
 let lastTime = 0;
 let starSeed = Array.from({length:70}, () => ({
@@ -343,6 +376,8 @@ function makeState() {
         shield:false,
         laserTime:0,
         slowTime:0,
+        aiLaunchDelay:0,
+        aiLaserCooldown:0,
         modifier:modifiers[0],
         paddle:{x:W / 2 - 75, y:H - 42, w:150, h:14, target:W / 2},
         balls:[],
@@ -395,6 +430,26 @@ function setTemporaryMessage(text, frames = 90) {
     state.messageTimer = frames;
 }
 
+function syncControlModeButtons() {
+    playerModeBtn.classList.toggle("active", controlMode === "player");
+    aiModeBtn.classList.toggle("active", controlMode === "ai");
+}
+
+function setControlMode(mode) {
+    controlMode = mode;
+    syncControlModeButtons();
+    if (!state) return;
+    if (mode === "ai") {
+        state.aiLaunchDelay = 18;
+        setTemporaryMessage("人机接管");
+        addEvent("切换到人机模式。");
+        if (state.mode === "ready" || state.mode === "gameover" || state.mode === "win") startGame();
+    } else {
+        setTemporaryMessage("玩家接管");
+        addEvent("切换到玩家模式。");
+    }
+}
+
 function startGame() {
     initAudio();
     state = makeState();
@@ -403,6 +458,10 @@ function startGame() {
     buildLevel();
     hideOverlay();
     state.mode = "aim";
+    if (controlMode === "ai") {
+        state.aiLaunchDelay = 18;
+        setTemporaryMessage("人机接管");
+    }
     cancelAnimationFrame(rafId);
     lastTime = performance.now();
     rafId = requestAnimationFrame(loop);
@@ -680,7 +739,79 @@ function loseLife() {
     setTemporaryMessage("掉球了，重新瞄准。");
 }
 
+function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+}
+
+function predictLandingX(ball) {
+    if (ball.stuck || ball.dy <= .05) return null;
+    const p = state.paddle;
+    const steps = (p.y - ball.y) / ball.dy;
+    if (steps <= 0) return null;
+    const minX = ball.r;
+    const maxX = W - ball.r;
+    const span = maxX - minX;
+    let x = ball.x + ball.dx * steps;
+    let offset = (x - minX) % (span * 2);
+    if (offset < 0) offset += span * 2;
+    return offset <= span ? minX + offset : maxX - (offset - span);
+}
+
+function chooseAiTarget() {
+    const p = state.paddle;
+    const center = p.x + p.w / 2;
+    if (state.mode === "aim") {
+        const alive = state.bricks.filter(brick => brick.alive);
+        if (alive.length === 0) return W / 2;
+        const target = alive.reduce((best, brick) => {
+            const score = brick.y + Math.abs((brick.x + brick.w / 2) - W / 2) * .18;
+            return score < best.score ? {brick, score} : best;
+        }, {brick:alive[0], score:Infinity}).brick;
+        return clamp(target.x + target.w / 2, 90, W - 90);
+    }
+
+    let targetX = W / 2;
+    let urgency = Infinity;
+    for (const ball of state.balls) {
+        const landingX = predictLandingX(ball);
+        if (landingX === null) continue;
+        const steps = (p.y - ball.y) / ball.dy;
+        if (steps < urgency) {
+            urgency = steps;
+            targetX = landingX;
+        }
+    }
+
+    const catchableDrop = state.powerUps
+        .filter(pu => pu.y < p.y && pu.y > H * .34)
+        .sort((a, b) => b.y - a.y)[0];
+    if (catchableDrop && (urgency > 70 || Math.abs(catchableDrop.x - targetX) < p.w * .75)) {
+        targetX = catchableDrop.x;
+    } else if (urgency === Infinity) {
+        const activeBall = state.balls.find(ball => !ball.stuck);
+        targetX = activeBall ? activeBall.x : center;
+    }
+
+    return clamp(targetX, p.w / 2, W - p.w / 2);
+}
+
+function updateAiController(dt) {
+    if (controlMode !== "ai" || state.mode === "paused") return;
+    pointerX = chooseAiTarget();
+    state.aiLaunchDelay = Math.max(0, state.aiLaunchDelay - dt * 60);
+    state.aiLaserCooldown = Math.max(0, state.aiLaserCooldown - dt * 60);
+    if (state.mode === "aim" && state.aiLaunchDelay <= 0) {
+        launchBalls();
+        state.aiLaunchDelay = 24;
+    }
+    if (state.mode === "playing" && state.laserTime > 0 && state.aiLaserCooldown <= 0) {
+        fireLaser();
+        state.aiLaserCooldown = 18;
+    }
+}
+
 function update(dt) {
+    updateAiController(dt);
     const p = state.paddle;
     p.target = pointerX;
     p.x += (p.target - (p.x + p.w / 2)) * Math.min(1, dt * 13);
@@ -997,24 +1128,31 @@ function setPointer(clientX) {
     pointerX = Math.max(0, Math.min(W, (clientX - rect.left) * ratio));
 }
 
-document.addEventListener("mousemove", e => setPointer(e.clientX));
-canvas.addEventListener("pointermove", e => setPointer(e.clientX));
+document.addEventListener("mousemove", e => {
+    if (controlMode === "player") setPointer(e.clientX);
+});
+canvas.addEventListener("pointermove", e => {
+    if (controlMode === "player") setPointer(e.clientX);
+});
 canvas.addEventListener("pointerdown", e => {
-    setPointer(e.clientX);
+    if (controlMode === "player") setPointer(e.clientX);
     if (!state || state.mode === "ready" || state.mode === "gameover" || state.mode === "win") startGame();
-    else if (state.mode === "aim") launchBalls();
+    else if (controlMode === "player" && state.mode === "aim") launchBalls();
 });
 document.addEventListener("keydown", e => {
     if (e.code === "Space") {
         e.preventDefault();
         if (!state || state.mode === "ready" || state.mode === "gameover" || state.mode === "win") startGame();
-        else if (state.mode === "aim" || state.balls.some(ball => ball.stuck)) launchBalls();
-        else if (state.mode === "playing") fireLaser();
+        else if (controlMode === "player" && (state.mode === "aim" || state.balls.some(ball => ball.stuck))) launchBalls();
+        else if (controlMode === "player" && state.mode === "playing") fireLaser();
     }
     if (e.code === "KeyP") pauseGame();
 });
+playerModeBtn.addEventListener("click", () => setControlMode("player"));
+aiModeBtn.addEventListener("click", () => setControlMode("ai"));
 
 state = makeState();
+syncControlModeButtons();
 buildLevel();
 render(performance.now());
 syncStats();
