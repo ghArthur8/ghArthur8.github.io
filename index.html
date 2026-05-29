@@ -422,23 +422,27 @@ function buildLevel() {
     state.paddle.target = W / 2;
     createBall(true);
 
-    const cols = 13 + Math.min(4, Math.floor(state.level / 2));
-    const rows = 6 + Math.min(4, state.level);
-    const gap = 8;
-    const bw = Math.floor((W - 120 - gap * (cols - 1)) / cols);
-    const bh = 24;
+    const cols = 14;
+    const rows = 6 + Math.min(3, Math.floor((state.level - 1) / 2));
+    const gap = 6;
+    const bw = Math.floor((W - 140 - gap * (cols - 1)) / cols);
+    const bh = 23;
     const ox = (W - cols * bw - (cols - 1) * gap) / 2;
     const oy = 78;
+    const rowHues = [0,25,48,145,190,235,275,315,345];
     for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
-            const wave = Math.sin((c + state.level) * .9) + Math.cos((r + state.level) * .65);
-            if (wave < -1.32 && state.level > 1) continue;
+            const edgeBrick = c === 0 || c === cols - 1;
+            const staggerGap = r % 2 === 1 && (c + state.level) % 4 === 0;
+            const centerGap = r > 1 && Math.abs(c - (cols - 1) / 2) < 1.2 && (r + state.level) % 3 !== 0;
+            const diagonalGap = r > 2 && (c + r + state.level) % 7 === 0;
+            if (!edgeBrick && (staggerGap || centerGap || diagonalGap)) continue;
             let type = "normal";
             let hp = 1;
             const roll = Math.random();
-            if (roll < .08 + state.level * .006) type = "bomb";
+            if (roll < .045 + state.level * .004) type = "bomb";
             else if (roll < .18 + state.level * .01) { type = "hard"; hp = state.modifier.name === "硬核砖墙" ? 4 : 3; }
-            else if (roll < .28 + state.modifier.drop * .04) type = "gift";
+            else if (roll < .27 + state.modifier.drop * .025) type = "gift";
             state.bricks.push({
                 x:ox + c * (bw + gap),
                 y:oy + r * (bh + gap),
@@ -448,7 +452,7 @@ function buildLevel() {
                 maxHp:hp,
                 type,
                 alive:true,
-                hue:(190 + c * 15 + r * 24 + state.level * 18) % 360
+                hue:(rowHues[r % rowHues.length] + state.level * 4) % 360
             });
         }
     }
