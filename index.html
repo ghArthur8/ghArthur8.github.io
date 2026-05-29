@@ -163,8 +163,8 @@ h1{
     display:inline-flex;
     align-items:center;
     gap:6px;
-    height:28px;
-    padding:0 10px;
+    min-height:28px;
+    padding:5px 10px;
     border:1px solid #385671;
     border-radius:999px;
     background:#101d31;
@@ -224,7 +224,7 @@ h1{
     <aside class="panel side">
         <div>
             <h1>超级打砖块</h1>
-            <p class="tagline">瞄准发球、连击升温、接道具、躲危险掉落物。每一关都有新词缀。</p>
+            <p class="tagline">瞄准发球、连击升温、接道具、清砖块。每一关都有新词缀。</p>
         </div>
         <section class="stat-grid" aria-label="游戏数据">
             <div class="stat"><div class="label">得分</div><div class="value" id="score">0</div></div>
@@ -262,7 +262,7 @@ h1{
                 <div class="legend-row"><span>炸弹砖</span><span class="swatch" style="color:#ef4444;background:#ef4444"></span></div>
                 <div class="legend-row"><span>钢铁砖</span><span class="swatch" style="color:#94a3b8;background:#94a3b8"></span></div>
                 <div class="legend-row"><span>礼物砖</span><span class="swatch" style="color:#facc15;background:#facc15"></span></div>
-                <div class="legend-row"><span>危险坠物</span><span class="swatch" style="color:#f97316;background:#f97316"></span></div>
+                <div class="legend-row"><span>护盾道具</span><span class="swatch" style="color:#22d3ee;background:#22d3ee"></span></div>
             </div>
         </section>
         <section>
@@ -288,12 +288,13 @@ const feed = document.getElementById("feed");
 
 const W = canvas.width;
 const H = canvas.height;
+const maxLevel = 12;
 const modifiers = [
     {name:"普通航线", ball:1, gravity:1, drop:1},
     {name:"高速雨", ball:1.14, gravity:1.18, drop:1.2},
     {name:"礼物加班", ball:.98, gravity:.95, drop:1.55},
     {name:"硬核砖墙", ball:1.05, gravity:1, drop:.9},
-    {name:"Boss 航母", ball:1.08, gravity:1.05, drop:1}
+    {name:"霓虹巡航", ball:1.08, gravity:1.05, drop:1}
 ];
 const powerColors = {
     multi:"#facc15",
@@ -302,8 +303,7 @@ const powerColors = {
     laser:"#ef4444",
     shield:"#22d3ee",
     slow:"#a78bfa",
-    blast:"#fb7185",
-    magnet:"#f59e0b"
+    blast:"#fb7185"
 };
 const powerLabels = {
     multi:"多球",
@@ -312,13 +312,11 @@ const powerLabels = {
     laser:"激光",
     shield:"护盾",
     slow:"慢放",
-    blast:"清屏",
-    magnet:"吸附"
+    blast:"清屏"
 };
 
 let audioCtx;
 let state;
-let keys = {};
 let pointerX = W / 2;
 let rafId = 0;
 let lastTime = 0;
@@ -345,13 +343,11 @@ function makeState() {
         shield:false,
         laserTime:0,
         slowTime:0,
-        magnetTime:0,
         modifier:modifiers[0],
         paddle:{x:W / 2 - 75, y:H - 42, w:150, h:14, target:W / 2},
         balls:[],
         bricks:[],
         powerUps:[],
-        hazards:[],
         lasers:[],
         particles:[]
     };
@@ -418,7 +414,6 @@ function buildLevel() {
     state.balls = [];
     state.bricks = [];
     state.powerUps = [];
-    state.hazards = [];
     state.lasers = [];
     state.particles = [];
     state.combo = 0;
@@ -426,22 +421,6 @@ function buildLevel() {
     state.paddle.x = W / 2 - state.paddle.w / 2;
     state.paddle.target = W / 2;
     createBall(true);
-
-    if (state.level % 5 === 0) {
-        state.bricks.push({
-            x:W / 2 - 140,
-            y:92,
-            w:280,
-            h:86,
-            hp:72 + state.level * 10,
-            maxHp:72 + state.level * 10,
-            type:"boss",
-            alive:true,
-            hue:300
-        });
-        addEvent("Boss 出现，打掉它的护甲条。");
-        return;
-    }
 
     const cols = 13 + Math.min(4, Math.floor(state.level / 2));
     const rows = 6 + Math.min(4, state.level);
@@ -551,7 +530,6 @@ function brickColor(brick) {
     if (brick.type === "bomb") return "#ef4444";
     if (brick.type === "hard") return "#94a3b8";
     if (brick.type === "gift") return "#facc15";
-    if (brick.type === "boss") return "#d946ef";
     return `hsl(${brick.hue},82%,58%)`;
 }
 
@@ -563,11 +541,11 @@ function damageBrick(brick, amount = 1) {
         return;
     }
     brick.alive = false;
-    const gain = brick.type === "boss" ? 650 : 12 + state.combo * 2;
+    const gain = 12 + state.combo * 2;
     state.score += state.feverTime > 0 ? gain * 2 : gain;
     state.combo += 1;
     state.fever = Math.min(100, state.fever + 5 + Math.min(8, state.combo / 3));
-    spawnParticles(brick.x + brick.w / 2, brick.y + brick.h / 2, brickColor(brick), brick.type === "boss" ? 90 : 18, brick.type === "boss" ? 1.7 : 1);
+    spawnParticles(brick.x + brick.w / 2, brick.y + brick.h / 2, brickColor(brick), 18);
     beep(240 + Math.random() * 360, "triangle", .06);
 
     if (state.combo === 8) setTemporaryMessage("8 连击，开始热了！");
@@ -582,7 +560,6 @@ function damageBrick(brick, amount = 1) {
 
     if (brick.type === "bomb") explodeAround(brick);
     if (brick.type === "gift" || Math.random() < .17 * state.modifier.drop) spawnPower(brick.x + brick.w / 2, brick.y + brick.h / 2);
-    if (Math.random() < .04 + state.level * .007) spawnHazard(brick.x + brick.w / 2, brick.y + brick.h / 2);
 }
 
 function explodeAround(origin) {
@@ -601,8 +578,8 @@ function explodeAround(origin) {
 }
 
 function spawnPower(x, y) {
-    const types = ["multi","life","wide","laser","shield","slow","blast","magnet"];
-    const weights = [24,10,16,16,12,10,7,12];
+    const types = ["multi","life","wide","laser","shield","slow","blast"];
+    const weights = [24,10,16,16,12,10,7];
     let total = weights.reduce((a,b) => a + b, 0);
     let pick = Math.random() * total;
     let type = "multi";
@@ -611,10 +588,6 @@ function spawnPower(x, y) {
         if (pick <= 0) { type = types[i]; break; }
     }
     state.powerUps.push({x, y, type, vy:2.4 * state.modifier.gravity, spin:0});
-}
-
-function spawnHazard(x, y) {
-    state.hazards.push({x, y, vy:2.8 * state.modifier.gravity, r:12, spin:0});
 }
 
 function applyPower(type) {
@@ -644,13 +617,9 @@ function applyPower(type) {
         setTemporaryMessage("慢放时间，稳稳接球。");
     }
     if (type === "blast") {
-        const targets = state.bricks.filter(b => b.alive && b.type !== "boss").slice(0, 18);
+        const targets = state.bricks.filter(b => b.alive).slice(0, 18);
         targets.forEach(b => damageBrick(b, 99));
         state.shake = 24;
-    }
-    if (type === "magnet") {
-        state.magnetTime = 620;
-        setTemporaryMessage("磁力挡板，球会短暂吸附。");
     }
 }
 
@@ -674,7 +643,7 @@ function prepareRespawnBall() {
 
 function nextLevel() {
     state.level += 1;
-    if (state.level > 12) {
+    if (state.level > maxLevel) {
         state.mode = "win";
         showOverlay("通关成功", `最终得分 ${state.score}。按空格或点击再来一局。`);
         addEvent("十二关全清，漂亮。");
@@ -741,18 +710,12 @@ function update(dt) {
             ball.dy = -Math.sqrt(Math.max(10, speed * speed - ball.dx * ball.dx));
             ball.y = p.y - ball.r - 1;
             beep(360, "triangle", .05);
-            if (state.magnetTime > 0 && Math.abs(hit) < .82) {
-                ball.stuck = true;
-                state.mode = "aim";
-                setTemporaryMessage("已吸附，重新瞄准。", 60);
-            }
         }
 
         for (const brick of state.bricks) {
             if (!brick.alive) continue;
             if (ball.x + ball.r > brick.x && ball.x - ball.r < brick.x + brick.w && ball.y + ball.r > brick.y && ball.y - ball.r < brick.y + brick.h) {
                 const prevX = ball.x - ball.dx * dt * 60;
-                const prevY = ball.y - ball.dy * dt * 60;
                 const fromSide = prevX <= brick.x || prevX >= brick.x + brick.w;
                 if (fromSide) ball.dx *= -1;
                 else ball.dy *= -1;
@@ -775,28 +738,13 @@ function update(dt) {
         } else if (pu.y > H + 30) state.powerUps.splice(i, 1);
     }
 
-    for (let i = state.hazards.length - 1; i >= 0; i--) {
-        const hz = state.hazards[i];
-        hz.y += hz.vy * dt * 60;
-        hz.spin += dt * 9;
-        if (hz.y + hz.r >= p.y && hz.x >= p.x && hz.x <= p.x + p.w) {
-            state.hazards.splice(i, 1);
-            state.combo = 0;
-            state.score = Math.max(0, state.score - 80);
-            state.shake = 18;
-            p.w = Math.max(115, p.w - 18);
-            setTemporaryMessage("危险坠物命中，扣分并缩短挡板。");
-            beep(120, "sawtooth", .16, .08);
-        } else if (hz.y > H + 30) state.hazards.splice(i, 1);
-    }
-
     for (let i = state.lasers.length - 1; i >= 0; i--) {
         const l = state.lasers[i];
         l.y -= 820 * dt;
         for (const brick of state.bricks) {
             if (!brick.alive) continue;
             if (l.x > brick.x && l.x < brick.x + brick.w && l.y > brick.y && l.y < brick.y + brick.h) {
-                damageBrick(brick, brick.type === "boss" ? 2 : 1);
+                damageBrick(brick);
                 l.dead = true;
                 break;
             }
@@ -815,7 +763,6 @@ function update(dt) {
 
     if (state.laserTime > 0) state.laserTime -= dt * 60;
     if (state.slowTime > 0) state.slowTime -= dt * 60;
-    if (state.magnetTime > 0) state.magnetTime -= dt * 60;
     if (state.feverTime > 0) state.feverTime -= dt * 60;
     if (state.messageTimer > 0) state.messageTimer -= dt * 60;
     if (state.shake > 0) state.shake -= dt * 60;
@@ -863,7 +810,7 @@ function drawBricks() {
         const color = brickColor(brick);
         ctx.save();
         ctx.shadowColor = color;
-        ctx.shadowBlur = brick.type === "boss" ? 26 : 10;
+        ctx.shadowBlur = 10;
         ctx.fillStyle = color;
         roundedRect(brick.x, brick.y, brick.w, brick.h, 6);
         ctx.fill();
@@ -871,18 +818,18 @@ function drawBricks() {
         ctx.fillStyle = "rgba(255,255,255,.22)";
         roundedRect(brick.x + 5, brick.y + 4, brick.w - 10, Math.max(4, brick.h * .18), 4);
         ctx.fill();
-        if (brick.type === "hard" || brick.type === "boss") {
+        if (brick.type === "hard") {
             ctx.fillStyle = "#08111f";
             ctx.fillRect(brick.x + 10, brick.y + brick.h - 12, brick.w - 20, 6);
             ctx.fillStyle = "#36d399";
             ctx.fillRect(brick.x + 10, brick.y + brick.h - 12, (brick.w - 20) * (brick.hp / brick.maxHp), 6);
         }
-        if (brick.type === "bomb" || brick.type === "gift" || brick.type === "boss") {
+        if (brick.type === "bomb" || brick.type === "gift") {
             ctx.fillStyle = brick.type === "gift" ? "#111827" : "white";
-            ctx.font = brick.type === "boss" ? "700 24px Arial" : "700 15px Arial";
+            ctx.font = "700 15px Arial";
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
-            ctx.fillText(brick.type === "bomb" ? "!" : brick.type === "gift" ? "*" : "BOSS", brick.x + brick.w / 2, brick.y + brick.h / 2 - 1);
+            ctx.fillText(brick.type === "bomb" ? "!" : "*", brick.x + brick.w / 2, brick.y + brick.h / 2 - 1);
             ctx.textAlign = "left";
             ctx.textBaseline = "alphabetic";
         }
@@ -894,7 +841,7 @@ function drawPaddle() {
     const p = state.paddle;
     const grad = ctx.createLinearGradient(p.x, p.y, p.x + p.w, p.y);
     grad.addColorStop(0, "#22c55e");
-    grad.addColorStop(.5, state.laserTime > 0 ? "#ef4444" : state.magnetTime > 0 ? "#f59e0b" : "#bbf7d0");
+    grad.addColorStop(.5, state.laserTime > 0 ? "#ef4444" : "#bbf7d0");
     grad.addColorStop(1, "#22c55e");
     ctx.save();
     ctx.shadowColor = state.laserTime > 0 ? "#ef4444" : "#36d399";
@@ -966,27 +913,6 @@ function drawDrops() {
         ctx.fillText(powerLabels[pu.type], 0, 1);
         ctx.restore();
     }
-    for (const hz of state.hazards) {
-        ctx.save();
-        ctx.translate(hz.x, hz.y);
-        ctx.rotate(hz.spin);
-        ctx.shadowColor = "#f97316";
-        ctx.shadowBlur = 14;
-        ctx.fillStyle = "#f97316";
-        ctx.beginPath();
-        ctx.moveTo(0, -15);
-        ctx.lineTo(14, 12);
-        ctx.lineTo(-14, 12);
-        ctx.closePath();
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        ctx.fillStyle = "#111827";
-        ctx.font = "700 16px Arial";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("!", 0, 4);
-        ctx.restore();
-    }
 }
 
 function drawLasers() {
@@ -1046,7 +972,7 @@ function render(time) {
 function syncStats() {
     scoreEl.textContent = Math.floor(state.score);
     livesEl.textContent = state.lives;
-    levelEl.textContent = state.level + "/12";
+    levelEl.textContent = state.level + "/" + maxLevel;
     comboEl.textContent = state.combo;
     feverMeter.style.width = (state.feverTime > 0 ? 100 : state.fever) + "%";
 }
